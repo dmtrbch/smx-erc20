@@ -4,11 +4,8 @@ pragma solidity 0.8.13;
 import {ERC20} from "./ERC20.sol";
 import {DepositorCoin} from "./DepositorCoin.sol";
 import {Oracle} from "./Oracle.sol";
-import {WadLib} from "./WadLib.sol";
 
 contract StableCoin is ERC20 {
-  using WadLib for uint256;
-
   DepositorCoin public depositorCoin;
 
   Oracle public oracle;
@@ -30,9 +27,6 @@ contract StableCoin is ERC20 {
   }
 
   function burn(uint256 burnStableCoinAmount) external {
-    int256 deficitOrSurplusInUsd = _getDeficitOrSurplusInContractInUsd();
-    require(deficitOrSurplusInUsd >= 0, "STC: Cannot burn while in deficit");
-
     _burn(msg.sender, burnStableCoinAmount);
 
     uint256 refundingEth = burnStableCoinAmount / oracle.getPrice();
@@ -67,32 +61,11 @@ contract StableCoin is ERC20 {
     }
 
     uint256 surplusInUsd = uint256(deficitOrSurplusInUsd);
-    WadLib.Wad dpcInUsdPrice = _getDPCInUsdPrice(surplusInUsd);
+    uint256 dpcInUsdPrice = _getDPCInUsdPrice(surplusInUsd);
 
-    uint256 mintDepositorCoinAmount = (msg.value * oracle.getPrice()).divWad(dpcInUsdPrice);
+    uint256 mintDepositorCoinAmount = (msg.value * oracle.getPrice()) / dpcInUsdPrice;
 
     depositorCoin.mint(msg.sender, mintDepositorCoinAmount);
-  }
-
-  function withdrawCollateralBuffer(uint256 burnDepositorCoinAmount) external {
-    require(depositorCoin.balanceOf(msg.sender) >= burnDepositorCoinAmount, "STC: Sender has insufficient DPC funds");
-
-    depositorCoin.burn(msg.sender, burnDepositorCoinAmount);
-
-    int256 deficitOrSurplusInUsd = _getDeficitOrSurplusInContractInUsd();
-    require(deficitOrSurplusInUsd > 0, "STC: No funds to withdraw");
-
-    uint256 surplusInUsd = uint256(deficitOrSurplusInUsd);
-    WadLib.Wad dpcInUsdPrice = _getDPCInUsdPrice(surplusInUsd);
-    uint256 refundingUsd = burnDepositorCoinAmount.divWad(dpcInUsdPrice);
-    uint256 refundingEth = refundingUsd / oracle.getPrice();
-
-    (bool success,) = msg.sender.call{value: refundingEth}("");
-    require(success, "STC: Withdraw refund transaction failed");
-  }
-
-  function getDepositorContractAddress() external view returns (address) {
-    return address(depositorCoin);
   }
 
   function _getFee(uint256 ethAmount) private view returns (uint256) {
@@ -115,7 +88,7 @@ contract StableCoin is ERC20 {
     return deficitOrSurplus;
   }
 
-  function _getDPCInUsdPrice(uint256 surplusInUsd) private view returns (WadLib.Wad) {
-    return WadLib.fromFraction(surplusInUsd, depositorCoin.totalSupply());
+  function _getDPCInUsdPrice(uint256 surplusInUsd) private view returns (uint256) {
+    return surplusInUsd / depositorCoin.totalSupply();
   }
 }
